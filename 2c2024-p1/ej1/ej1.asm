@@ -14,21 +14,21 @@ TRUE  EQU 1
 ; Funciones a implementar:
 ;   - es_indice_ordenado
 global EJERCICIO_1A_HECHO
-EJERCICIO_1A_HECHO: db FALSE ; Cambiar por `TRUE` para correr los tests.
+EJERCICIO_1A_HECHO: db TRUE ; Cambiar por `TRUE` para correr los tests.
 
 ; Marca el ejercicio 1B como hecho (`true`) o pendiente (`false`).
 ;
 ; Funciones a implementar:
 ;   - indice_a_inventario
 global EJERCICIO_1B_HECHO
-EJERCICIO_1B_HECHO: db FALSE ; Cambiar por `TRUE` para correr los tests.
+EJERCICIO_1B_HECHO: db TRUE ; Cambiar por `TRUE` para correr los tests.
 
 ;########### ESTOS SON LOS OFFSETS Y TAMAÑO DE LOS STRUCTS
 ; Completar las definiciones (serán revisadas por ABI enforcer):
-ITEM_NOMBRE EQU ??
-ITEM_FUERZA EQU ??
-ITEM_DURABILIDAD EQU ??
-ITEM_SIZE EQU ??
+ITEM_NOMBRE EQU 0
+ITEM_FUERZA EQU 20
+ITEM_DURABILIDAD EQU 24
+ITEM_SIZE EQU 28
 
 ;; La funcion debe verificar si una vista del inventario está correctamente 
 ;; ordenada de acuerdo a un criterio (comparador)
@@ -59,11 +59,84 @@ es_indice_ordenado:
 	; ubicación según la convención de llamada. Prestá atención a qué
 	; valores son de 64 bits y qué valores son de 32 bits o 8 bits.
 	;
-	; r/m64 = item_t**     inventario
-	; r/m64 = uint16_t*    indice
-	; r/m16 = uint16_t     tamanio
-	; r/m64 = comparador_t comparador
-		ret
+	; RDI = item_t**     inventario
+	; RSI = uint16_t*    indice
+	; DX = uint16_t     tamanio
+	; RCX = comparador_t comparador
+	;prologo
+	push RBP
+	mov RBP, RSP
+	push RBX
+	push R12 
+	push R13
+	push R14
+	push R15
+	sub RSP, 8; alineada
+
+	;guardo mis parametros en regustros no volatiles
+	mov RBX, RDI ;me guardo el inventario en otro lado asi pido la memoria necesaria para el nuevo inventario 
+	mov R12, RSI ; guardo indice
+	mov R13, RDX ; guardo tamanio
+	mov R14, RCX
+
+	;ahora pedir memoria para el nuevo inventario
+	imul DX, ITEM_SIZE ; tamanio * item-size
+	xor RDI, RDI
+	mov DI, DX
+	call malloc 
+	mov R15, RAX
+	xor R8, R8 ; i = 0
+
+.nuevoInventarioRecorrer: ;guardo los valores del inventario al nuevo inventario segun la vista que me dieron
+	cmp R8, R13 ; llegue al final de el arreglo
+	je .comparar
+	xor RDI, RDI
+	mov R10, 2 ;dos bytes
+	imul R10, R8 ; i*2
+	mov DI, [R12 + R10] ; indice[i]
+	imul DI, 8 ; RDI = indice i * 8 bytes
+	mov R10, [RBX + RDI] ; R10 = inventario[indice[i]]
+	mov R9, R8 ;R9 = i
+	imul R9, 8; R9 = i * 8 bytes
+	mov [R15 + R9], R10; inventarioSegunVIsta[indice[i]] = inventario[indice[i]]
+	inc R8 ;i++
+	jmp .nuevoInventarioRecorrer
+
+.comparar:
+	xor R8, R8 ; i = 0
+	xor R9,R9 ; res = false
+	dec R9; res = true
+	dec R13
+
+.recorroItemsYComparo:
+	cmp R8, R13
+	je .terminar
+	; pongo los valores a comparar en los registros esperados
+	mov RDX, R8
+	imul RDX, 8 ; RDX = indice i * item size
+	mov RDI, [R15 + RDX] ; RDI = inventarioSegunVista[i],
+	add RDX, 8
+	mov RSI, [R15 + RDX]; RSI = inventarioSegunVista[i+1],
+	call R14
+	and R9, RAX
+	inc R8
+	jmp .recorroItemsYComparo
+
+.terminar:
+	mov RAX, R9 ;retornar el res
+	;mov RDI, R12;paso a free el puntero de inventario que cree y lo livero
+	;call free 
+	;epilogo
+	add RSP, 8
+	pop R15
+	pop R14
+	pop R13
+	pop R12
+	pop RBX
+	pop RBP
+	ret
+
+
 
 ;; Dado un inventario y una vista, crear un nuevo inventario que mantenga el
 ;; orden descrito por la misma.
@@ -91,7 +164,49 @@ indice_a_inventario:
 	; ubicación según la convención de llamada. Prestá atención a qué
 	; valores son de 64 bits y qué valores son de 32 bits o 8 bits.
 	;
-	; r/m64 = item_t**  inventario
-	; r/m64 = uint16_t* indice
-	; r/m16 = uint16_t  tamanio
+	; RDI = item_t**  inventario
+	; RSI = uint16_t* indice
+	; DX = uint16_t  tamanio
+
+	;prologo
+	push RBP
+	mov RBP, RSP
+	push RBX
+	push R12 ;alineada
+	push R13
+	sub RSP, 8 ; alineada
+
+	; guardo los registros no volatiles que voy a utilizar
+	mov RBX, RDI
+	mov R12, RSI 
+	mov R13, RDX
+
+	; primero calculo la cantidad de memoria que debo pedir
+	mov RDI, RDX ; me guardo el tamao en el registro donde voy a llamar a malloc
+	imul RDI, ITEM_SIZE ; tamanio * item size
+	call malloc ; en RAX esta mi puntero a resultado
+	xor R8,R8 ; i = 0
+
+.loop:
+	cmp R8, R13
+	je .terminar
+	xor RDI,RDI
+	mov R10, 2 ; me guardo dos bytes
+	imul R10, R8 ; i*2
+	mov DI, [R12 + R10] ; indice[i]
+	imul DI, 8 ; RDI = indice i * 8 bytes
+	mov R10, [RBX + RDI] ; R10 = inventario[indice[i]]
+	mov R9, R8 ;R9 = i
+	imul R9, 8; R9 = i * 8 bytes
+	mov [RAX + R9], R10; inventarioSegunVIsta[indice[i]] = inventario[indice[i]]
+	inc R8 ;i++
+	jmp .loop
+
+.terminar:
+	;epilogo
+	add RSP, 8
+	pop R13
+	pop R12
+	pop RBX
+	pop RBP
 	ret
